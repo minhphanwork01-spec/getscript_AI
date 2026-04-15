@@ -37,7 +37,7 @@ if 'final_result' not in st.session_state:
 def translate_now(text_block, key, style, manual_req):
     try:
         genai.configure(api_key=key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         instructions = {
             "Hiện đại (Tôi - Bạn)": "Dịch kịch truyền thanh hiện đại, xưng hô Anh/Em, Tôi/Bạn linh hoạt.",
