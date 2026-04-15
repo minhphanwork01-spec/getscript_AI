@@ -17,16 +17,18 @@ with st.sidebar:
     st.header("Cấu hình hệ thống")
     cookie = st.text_input("Cookie xác thực (Missevan):", type="password")
     st.markdown("---")
-    st.subheader("Thông tin kỹ thuật")
-    st.write("- **Engine:** Google Translate via Deep Translator")
-    st.write("- **Format:** UTF-8 Text")
-    st.write("- **Xử lý:** Tách dòng giữ mốc thời gian")
+    st.info("**Quy trình:** Bóc tách -> Hiện Text Gốc & Nút tải Gốc -> Dịch ngầm -> Hiện Nút tải Dịch.")
 
 # 3. Giao diện nhập liệu
 url_input = st.text_input("Nhập liên kết âm thanh Missevan:", placeholder="https://www.missevan.com/sound/11339811")
 
-if 'final_result' not in st.session_state:
-    st.session_state['final_result'] = None
+# Khởi tạo session_state
+if 'cn_output' not in st.session_state:
+    st.session_state['cn_output'] = None
+if 'vi_output' not in st.session_state:
+    st.session_state['vi_output'] = None
+if 'title' not in st.session_state:
+    st.session_state['title'] = "Sub_Missevan"
 
 # --- HÀM XỬ LÝ DỊCH THUẬT ---
 def translate_script(cn_text):
@@ -35,22 +37,13 @@ def translate_script(cn_text):
         lines = cn_text.split('\n')
         translated_lines = []
         
-        # Thanh tiến trình xử lý
-        progress_bar = st.progress(0)
-        content_lines = [l for l in lines if l.strip() and not l.startswith(('TITLE:', 'NGUỒN:', 'SỐ DÒNG:', '---'))]
-        total_to_translate = len(content_lines)
-        count = 0
+        progress_bar = st.progress(0, text="Đang khởi tạo bản dịch...")
         
-        for line in lines:
-            if not line.strip():
-                continue
-            
-            # Giữ nguyên các dòng tiêu đề không dịch
-            if any(key in line for key in ['TITLE:', 'NGUỒN:', 'SỐ DÒNG:', '---']):
-                translated_lines.append(line)
-                continue
-                
-            # Xử lý dịch dòng thoại có mốc thời gian
+        # Lọc danh sách dòng cần dịch để tính % chính xác
+        content_indices = [i for i, l in enumerate(lines) if re.match(r'\[.*?\]', l)]
+        total = len(content_indices)
+        
+        for i, line in enumerate(lines):
             match = re.match(r'(\[.*?\])\s*(.*)', line)
             if match:
                 timestamp, content = match.groups()
@@ -60,22 +53,23 @@ def translate_script(cn_text):
                 else:
                     translated_lines.append(line)
                 
-                count += 1
-                if total_to_translate > 0:
-                    progress_bar.progress(min(count / total_to_translate, 1.0))
+                # Cập nhật tiến độ
+                current_count = content_indices.index(i) + 1
+                progress_bar.progress(current_count / total, text=f"Đang dịch: {current_count}/{total} dòng")
             else:
                 translated_lines.append(line)
         
+        progress_bar.empty()
         return "\n".join(translated_lines)
     except Exception as e:
-        return f"[Lỗi xử lý dịch thuật: {str(e)}]"
+        return f"[Lỗi dịch: {str(e)}]"
 
-# 4. Logic xử lý dữ liệu
-if st.button("🚀 Khởi chạy bóc tách và dịch thuật", use_container_width=True):
+# 4. Logic bóc tách dữ liệu
+if st.button("🚀 Khởi chạy bóc tách dữ liệu", use_container_width=True):
     if not url_input:
-        st.warning("Vui lòng nhập liên kết hợp lệ.")
+        st.warning("Vui lòng nhập liên kết.")
     else:
-        with st.spinner("Đang truy xuất dữ liệu từ Missevan..."):
+        with st.spinner("Đang truy xuất từ Missevan..."):
             try:
                 parsed_url = urlparse(url_input)
                 query_params = parse_qs(parsed_url.query)
@@ -85,7 +79,7 @@ if st.button("🚀 Khởi chạy bóc tách và dịch thuật", use_container_w
                 info = requests.get(f"https://www.missevan.com/sound/getsound?soundid={sound_id}", headers=headers).json()
                 
                 if info.get('success'):
-                    title = info['info']['sound']['soundstr']
+                    st.session_state['title'] = info['info']['sound']['soundstr']
                     dm_resp = requests.get(f"https://www.missevan.com/sound/getdm?soundid={sound_id}", headers=headers)
                     root = ET.fromstring(dm_resp.content)
                     
@@ -100,48 +94,67 @@ if st.button("🚀 Khởi chạy bóc tách và dịch thuật", use_container_w
                     final = [i for i in items if i['uid'] in sub_uids and i['m'] in ['4', '5']] if sub_uids else items
                     final.sort(key=lambda x: x['t'])
                     
-                    # FORMAT NỘI DUNG GỐC (Y chang yêu cầu của Khai)
-                    cn_output = f"TITLE: {title}\n"
-                    cn_output += f"NGUỒN: {url_input}\n"
-                    cn_output += f"SỐ DÒNG: {len(final)}\n"
-                    cn_output += "-"*30 + "\n"
-                    
+                    # Tạo nội dung gốc
+                    cn_text = f"TITLE: {st.session_state['title']}\nNGUỒN: {url_input}\nSỐ DÒNG: {len(final)}\n" + "-"*30 + "\n"
                     for item in final:
                         m, s = divmod(int(item['t']), 60)
-                        cn_output += f"[{m:02d}:{s:02d}] {item['txt']}\n"
+                        cn_text += f"[{m:02d}:{s:02d}] {item['txt']}\n"
                     
-                    # Thực hiện dịch thuật
-                    vi_output = translate_script(cn_output)
-                    
-                    st.session_state['final_result'] = {
-                        'title': title,
-                        'cn': cn_output,
-                        'vi': vi_output,
-                        'file_name': f"Sub_{re.sub(r'[\\\\/*?:\u0022<>|]', '', title)}.txt"
-                    }
+                    st.session_state['cn_output'] = cn_text
+                    st.session_state['vi_output'] = None # Reset dịch
+                    st.rerun()
                 else:
-                    st.error("Truy xuất API thất bại. Vui lòng kiểm tra Cookie hoặc ID âm thanh.")
+                    st.error("Không tìm thấy dữ liệu âm thanh.")
             except Exception as e:
-                st.error(f"Lỗi hệ thống: {e}")
+                st.error(f"Lỗi: {e}")
 
-# 5. Hiển thị kết quả
-if st.session_state['final_result']:
-    res = st.session_state['final_result']
-    st.success(f"Xử lý hoàn tất: {res['title']}")
+# 5. HIỂN THỊ UI (PHẦN QUAN TRỌNG NHẤT)
+if st.session_state['cn_output']:
+    safe_title = re.sub(r'[\\/*?:"<>|]', '', st.session_state['title'])
     
-    st.download_button(
-        label="📥 Tải tệp bản dịch (.txt)",
-        data=res['vi'],
-        file_name=res['file_name'],
-        mime="text/plain",
-        use_container_width=True
-    )
+    # --- KHU VỰC NÚT TẢI PHÍA TRÊN ---
+    dl_col1, dl_col2 = st.columns(2)
     
+    with dl_col1:
+        # Nút tải bản gốc luôn sẵn sàng
+        st.download_button(
+            label="📥 Tải Bản Gốc (CN)",
+            data=st.session_state['cn_output'],
+            file_name=f"CN_{safe_title}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+        
+    with dl_col2:
+        # Kiểm tra trạng thái dịch để hiển thị nút
+        if st.session_state['vi_output']:
+            st.download_button(
+                label="📥 Tải Bản Dịch (VI)",
+                data=st.session_state['vi_output'],
+                file_name=f"VI_{safe_title}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        else:
+            # Nút giả bị làm mờ (disabled) khi chưa dịch xong
+            st.button("📥 Tải Bản Dịch (Đang xử lý...)", disabled=True, use_container_width=True)
+
     st.divider()
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Dữ liệu gốc (CN)")
-        st.code(res['cn'], language="text")
-    with col2:
-        st.subheader("Dữ liệu dịch (VI)")
-        st.code(res['vi'], language="text")
+
+    # --- KHU VỰC HIỂN THỊ TEXT ---
+    txt_col1, txt_col2 = st.columns(2)
+    
+    with txt_col1:
+        st.subheader("Văn bản gốc")
+        st.code(st.session_state['cn_output'], language="text")
+        
+    with txt_col2:
+        st.subheader("Văn bản dịch")
+        if st.session_state['vi_output'] is None:
+            # Chạy dịch ngầm nếu chưa có dữ liệu
+            with st.container():
+                vi_result = translate_script(st.session_state['cn_output'])
+                st.session_state['vi_output'] = vi_result
+                st.rerun()
+        else:
+            st.code(st.session_state['vi_output'], language="text")
